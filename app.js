@@ -10,6 +10,7 @@ const COLORS = {
     temp2: '#a855f7', // Purple 500
     idf: '#22c55e',   // Green 500
     rgf: '#ec4899',   // Pink 500
+    paf: '#06b6d4',   // Cyan 500
     soot: '#dc2626'   // Red 600
 };
 
@@ -159,6 +160,7 @@ function processData(data, fields) {
         else if (f.norm.includes('inlet bag') || f.norm.includes('flue temp')) keys.tempFlue = f.original;
         else if (f.norm.includes('idf')) keys.idf = f.original;
         else if (f.norm.includes('rgf')) keys.rgf = f.original;
+        else if (f.norm.includes('paf running') || f.norm.includes('pv control')) keys.paf = f.original;
         else if (f.norm.includes('soot')) keys.soot = f.original;
     });
 
@@ -174,6 +176,7 @@ function processData(data, fields) {
             tempFlue: parseFloat(row[keys.tempFlue]),
             idf: parseFloat(row[keys.idf]),
             rgf: parseFloat(row[keys.rgf]),
+            paf: parseFloat(row[keys.paf]),
             soot: parseFloat(row[keys.soot]) || 0
         };
     }).filter(d => d.date && !isNaN(d.date.getTime()) && !isNaN(d.power));
@@ -262,6 +265,9 @@ function updateKPIs(startTime = null, endTime = null) {
         } else if (type === 'rgf') {
             val = (dataToCalc.reduce((acc, r) => acc + r.rgf, 0) / dataToCalc.length).toFixed(1);
             unitEl.textContent = '%';
+        } else if (type === 'paf') {
+            val = (dataToCalc.reduce((acc, r) => acc + r.paf, 0) / dataToCalc.length).toFixed(1);
+            unitEl.textContent = '%';
         }
         valEl.textContent = val;
     }
@@ -311,6 +317,7 @@ function renderMainChart() {
             backgroundColor: COLORS.idf,
             yAxisID: 'y_percent',
             borderWidth: 1.5,
+            borderDash: [5, 5],
             pointRadius: 0,
             hidden: true
         },
@@ -320,6 +327,17 @@ function renderMainChart() {
             borderColor: COLORS.rgf,
             backgroundColor: COLORS.rgf,
             yAxisID: 'y_percent',
+            borderDash: [5, 5],
+            pointRadius: 0,
+            hidden: true
+        },
+        {
+            label: 'PAF Running (%)',
+            data: rawData.map(d => ({ x: d.date, y: d.paf })),
+            borderColor: COLORS.paf,
+            backgroundColor: COLORS.paf,
+            yAxisID: 'y_percent',
+            borderDash: [5, 5],
             pointRadius: 0,
             hidden: true
         },
@@ -702,7 +720,8 @@ function updateDynamicScales(chart, minTime, maxTime) {
     // Calculate max for Fan Speed (IDF/RGF) to apply padding
     const maxIDF = Math.max(...visibleData.map(d => d.idf));
     const maxRGF = Math.max(...visibleData.map(d => d.rgf));
-    const maxFan = Math.max(maxIDF, maxRGF, 100); // Default to at least 100 base
+    const maxPAF = Math.max(...visibleData.map(d => d.paf));
+    const maxFan = Math.max(maxIDF, maxRGF, maxPAF, 100); // Default to at least 100 base
 
     // For Temp, handle potential partial data
 
