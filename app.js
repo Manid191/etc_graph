@@ -14,13 +14,16 @@ const COLORS = {
 };
 
 const uploadInput = document.getElementById('uploadCsv');
-const dateFilter = document.getElementById('dateFilter');
+const applyDateBtn = document.getElementById('applyDateRange');
+const startDateInput = document.getElementById('startDate');
+const endDateInput = document.getElementById('endDate');
 
 document.addEventListener('DOMContentLoaded', init);
 
 async function init() {
     uploadInput.addEventListener('change', handleFileUpload);
-    dateFilter.addEventListener('change', handleDateFilter);
+    uploadInput.addEventListener('change', handleFileUpload);
+    if (applyDateBtn) applyDateBtn.addEventListener('click', handleDateRange);
     if (document.getElementById('kpiSelector3')) {
         document.getElementById('kpiSelector3').addEventListener('change', () => {
             if (charts.main) updateVisibleRange(charts.main);
@@ -91,19 +94,34 @@ window.resetApp = function () {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
 
-function handleDateFilter(evt) {
-    const dateStr = evt.target.value;
-    if (!dateStr || !charts.main) return;
+function handleDateRange() {
+    if (!charts.main || !startDateInput.value) return;
 
-    // dateStr is YYYY-MM-DD
-    const startOfDay = new Date(dateStr);
-    startOfDay.setHours(0, 0, 0, 0);
+    const start = new Date(startDateInput.value);
+    start.setHours(0, 0, 0, 0);
 
-    const minTime = startOfDay.getTime();
-    const maxTime = minTime + (24 * 60 * 60 * 1000);
+    let end;
+    if (endDateInput.value) {
+        end = new Date(endDateInput.value);
+        end.setHours(23, 59, 59, 999);
+    } else {
+        // If no end date selected, default to single day view (Start Date 00:00 to 23:59)
+        end = new Date(start);
+        end.setHours(23, 59, 59, 999);
+    }
 
-    charts.main.options.scales.x.time.unit = 'hour';
-    charts.main.zoomScale('x', { min: minTime, max: maxTime }, 'default');
+    if (start > end) {
+        alert("Start Date must be before End Date");
+        return;
+    }
+
+    charts.main.options.scales.x.time.unit = 'day';
+    // If range is small (< 3 days), switch to hour view
+    if ((end - start) < (3 * 24 * 60 * 60 * 1000)) {
+        charts.main.options.scales.x.time.unit = 'hour';
+    }
+
+    charts.main.zoomScale('x', { min: start.getTime(), max: end.getTime() }, 'default');
     updateVisibleRange(charts.main);
 }
 
@@ -328,35 +346,52 @@ function renderMainChart() {
             if (!x || x.min === undefined) return;
             const unit = x.options.time ? x.options.time.unit : null;
             const rangeInfo = x.max - x.min;
-            const isDayView = Math.abs(rangeInfo - 86400000) < 100000 || unit === 'hour';
+            // Allow background shifts if range is less than 3 days (approx)
+            const showShifts = rangeInfo < (3 * 24 * 60 * 60 * 1000);
 
-            if (!isDayView) return;
-
-            const visibleMin = new Date(x.min);
-            const startOfDay = new Date(visibleMin);
-            startOfDay.setHours(0, 0, 0, 0);
+            if (!showShifts) return;
 
             const shifts = [
-                { name: 'Shift 1', start: 0, end: 8, color: 'rgba(255, 235, 59, 0.1)' },
-                { name: 'Shift 2', start: 8, end: 16, color: 'rgba(255, 152, 0, 0.1)' },
-                { name: 'Shift 3', start: 16, end: 24, color: 'rgba(33, 150, 243, 0.1)' }
+                { name: 'Night Shift', start: 0, end: 8, color: 'rgba(59, 130, 246, 0.1)' },   // 00:00 - 08:00
+                { name: 'Morning Shift', start: 8, end: 16, color: 'rgba(234, 179, 8, 0.1)' },  // 08:00 - 16:00
+                { name: 'Afternoon Shift', start: 16, end: 24, color: 'rgba(249, 115, 22, 0.1)' } // 16:00 - 24:00
             ];
 
+            const startDate = new Date(x.min);
+            startDate.setHours(0, 0, 0, 0);
+            // Start 1 day before to ensure edge overlap
+            startDate.setDate(startDate.getDate() - 1);
+
+            const endDate = new Date(x.max);
+            endDate.setHours(0, 0, 0, 0);
+            // End 1 day after
+            endDate.setDate(endDate.getDate() + 1);
+
             ctx.save();
-            for (let i = -1; i <= 1; i++) {
-                const dayBase = new Date(startOfDay);
-                dayBase.setDate(dayBase.getDate() + i);
-                const baseTime = dayBase.getTime();
+            // Clip to chart area to prevent bleeding into axes
+            ctx.beginPath();
+            ctx.rect(chart.chartArea.left, chart.chartArea.top, chart.chartArea.right - chart.chartArea.left, chart.chartArea.bottom - chart.chartArea.top);
+            ctx.clip();
+
+            // Loop through each day in the range
+            for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+                const baseTime = d.getTime();
 
                 shifts.forEach(shift => {
                     const t1 = baseTime + (shift.start * 3600 * 1000);
                     const t2 = baseTime + (shift.end * 3600 * 1000);
+
+                    // Skip if out of view
                     if (t2 < x.min || t1 > x.max) return;
+
                     const startPixel = x.getPixelForValue(t1);
                     const endPixel = x.getPixelForValue(t2);
                     const width = endPixel - startPixel;
+
                     ctx.fillStyle = shift.color;
                     ctx.fillRect(startPixel, top, width, bottom - top);
+
+                    // Draw label if wide enough
                     if (width > 60) {
                         ctx.fillStyle = '#64748b';
                         ctx.font = '600 11px Outfit';
@@ -371,6 +406,12 @@ function renderMainChart() {
 
     const maxSteamVal = Math.max(...rawData.map(d => d.steam));
     const maxPowerVal = Math.max(...rawData.map(d => d.power));
+
+    // Combustion Temp Scaling
+    const tempVals = rawData.map(d => d.tempComb).filter(v => v > 0); // Filter zeros if any
+    const maxTempVal = tempVals.length ? Math.max(...tempVals) : 1000;
+    const minTempVal = tempVals.length ? Math.min(...tempVals) : 800;
+    const tempPadding = (maxTempVal - minTempVal) * 0.1; // 10% padding
 
     charts.main = new Chart(ctx, {
         type: 'line',
@@ -420,8 +461,12 @@ function renderMainChart() {
                     position: 'left',
                     title: { display: true, text: 'Steam (t/h)', color: COLORS.steam },
                     grid: { color: 'rgba(0, 0, 0, 0.1)' },
-                    suggestedMax: maxSteamVal * 1.1,
-                    suggestedMin: 0
+                    suggestedMax: maxSteamVal * 1.1, // 10% padding
+                    suggestedMin: 0,
+                    ticks: {
+                        precision: 0,
+                        callback: (v) => Math.round(v)
+                    }
                 },
                 y_power: {
                     type: 'linear',
@@ -429,8 +474,12 @@ function renderMainChart() {
                     position: 'right',
                     title: { display: true, text: 'Power (MW)', color: COLORS.power },
                     grid: { drawOnChartArea: false },
-                    suggestedMax: maxPowerVal * 1.1,
-                    suggestedMin: 0
+                    suggestedMax: maxPowerVal * 1.1, // 10% padding
+                    suggestedMin: 0,
+                    ticks: {
+                        precision: 0,
+                        callback: (v) => Math.round(v)
+                    }
                 },
                 y_percent: {
                     type: 'linear',
@@ -440,12 +489,23 @@ function renderMainChart() {
                     suggestedMax: 100,
                     title: { display: true, text: 'Fan Speed (%)', color: COLORS.idf },
                     grid: { drawOnChartArea: false },
-                    ticks: { callback: (v) => v + '%' }
+                    ticks: {
+                        precision: 0,
+                        callback: (v) => Math.round(v) + '%'
+                    }
                 },
                 y_temp: {
                     type: 'linear',
-                    display: false,
-                    position: 'right'
+                    display: true, // Show axis
+                    position: 'right',
+                    title: { display: true, text: 'Combustion Temp (°C)', color: COLORS.temp1 },
+                    grid: { drawOnChartArea: false },
+                    suggestedMin: Math.max(0, minTempVal - tempPadding),
+                    suggestedMax: maxTempVal + tempPadding, // Already applied padding in calculation
+                    ticks: {
+                        precision: 0,
+                        callback: (v) => Math.round(v)
+                    }
                 },
                 y_soot: {
                     type: 'linear',
@@ -622,6 +682,49 @@ function updateVisibleRange(chart) {
     }
 
     updateKPIs(min, max);
+    updateDynamicScales(chart, min, max);
+}
+
+function updateDynamicScales(chart, minTime, maxTime) {
+    // Filter visible data
+    const visibleData = rawData.filter(d => {
+        const t = d.date.getTime();
+        return t >= minTime && t <= maxTime;
+    });
+
+    if (visibleData.length === 0) return;
+
+    // Calculate max values directly from visible data
+    // Use fallback to global max or default 100 if range is empty/flat
+    const maxSteam = Math.max(...visibleData.map(d => d.steam));
+    const maxPower = Math.max(...visibleData.map(d => d.power));
+
+    // Calculate max for Fan Speed (IDF/RGF) to apply padding
+    const maxIDF = Math.max(...visibleData.map(d => d.idf));
+    const maxRGF = Math.max(...visibleData.map(d => d.rgf));
+    const maxFan = Math.max(maxIDF, maxRGF, 100); // Default to at least 100 base
+
+    // For Temp, handle potential partial data
+
+    // For Temp, handle potential partial data
+    const tempVals = visibleData.map(d => d.tempComb).filter(v => v > 0);
+    const maxTemp = tempVals.length > 0 ? Math.max(...tempVals) : 0;
+
+    // Apply 20% padding (Value * 1.2) as requested for day view comfort
+    // Ensure we don't shrink below a reasonable minimum if data is flat zero
+    if (chart.options.scales.y_steam) chart.options.scales.y_steam.max = Math.ceil((maxSteam > 0 ? maxSteam : 100) * 1.2);
+    if (chart.options.scales.y_power) chart.options.scales.y_power.max = Math.ceil((maxPower > 0 ? maxPower : 10) * 1.2);
+    if (chart.options.scales.y_percent) chart.options.scales.y_percent.max = Math.ceil(maxFan * 1.2);
+
+    if (chart.options.scales.y_temp && maxTemp > 0) {
+        // Find visible min for better scaling window
+        const minTemp = Math.min(...tempVals);
+        const padding = (maxTemp - minTemp) * 0.1;
+        // Use Value * 1.2
+        chart.options.scales.y_temp.max = maxTemp * 1.2;
+    }
+
+    chart.update('none');
 }
 
 window.captureDashboard = function () {

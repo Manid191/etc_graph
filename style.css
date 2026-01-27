@@ -36,8 +36,8 @@ body {
     height: 100%;
     display: flex;
     flex-direction: column;
-    padding: 32px;
-    gap: 24px;
+    padding: 24px;
+    gap: 16px;
     max-width: 1600px;
     margin: 0 auto;
 }
@@ -129,7 +129,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     background: var(--glass-bg);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
-    padding: 20px;
+    padding: 12px 20px;
     border-radius: var(--border-radius);
     border: 1px solid var(--glass-border);
     box-shadow: var(--glass-shadow);
@@ -145,7 +145,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .kpi-card select {
     font-size: 0.75rem;
     color: var(--text-secondary);
-    margin-bottom: 8px;
+    margin-bottom: 4px;
     text-transform: uppercase;
     letter-spacing: 0.1em;
     font-weight: 600;
@@ -164,10 +164,10 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 .kpi-card .value {
-    font-size: 2rem;
+    font-size: 1.75rem;
     font-weight: 700;
     color: var(--text-primary);
-    margin: 4px 0;
+    margin: 0;
 }
 
 .kpi-card .unit {
@@ -302,3 +302,6 @@ input[type="date"]::-webkit-calendar-picker-indicator {
         grid-template-columns: 1fr;
     }
 }
+/* Date Range Group */
+.date-range-group { display: inline-flex; align-items: center; gap: 8px; background: white; padding: 4px 8px; border-radius: 8px; border: 1px solid #e2e8f0; }
+.date-range-group input[type='date'] { border: none; background: transparent; font-family: inherit; font-size: 0.8rem; color: var(--text-primary); cursor: pointer; outline: none; padding: 0; }

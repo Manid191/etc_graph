@@ -32,7 +32,13 @@
                 <label for="uploadCsv" class="btn" style="cursor: pointer;">📂 Open CSV</label>
                 <input type="file" id="uploadCsv" accept=".csv" style="display: none;">
 
-                <input type="date" id="dateFilter" class="btn btn-sm">
+                <div class="date-range-group">
+                    <input type="date" id="startDate" class="btn btn-sm" title="Start Date">
+                    <span style="color: var(--text-secondary); font-size: 0.875rem;">to</span>
+                    <input type="date" id="endDate" class="btn btn-sm" title="End Date">
+                    <button id="applyDateRange" class="btn btn-sm"
+                        style="background: var(--primary); color: white; border-color: var(--primary);">Go</button>
+                </div>
 
                 <div class="zoom-controls" style="display: inline-flex; gap: 8px;">
                     <button class="btn btn-sm" onclick="zoomTime(24)">1 Day</button>
