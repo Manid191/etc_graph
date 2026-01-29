@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Power Plant Dashboard | Premium Monitoring</title>
+    <!-- Fonts -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Roboto:wght@300;400;500;700&display=swap"
+        rel="stylesheet">
+    <!-- Chart.js & Plugins -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.min.js"></script>
+    <!-- PapaParse -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <!-- html2canvas for dashboard capture -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <!-- Styles -->
+    <link rel="stylesheet" href="style.css?v=2.1">
+</head>
+
+<body>
+    <div class="dashboard" id="dashboard">
+        <header class="header">
+            <div class="header-left">
+                <h1>Power Plant Monitoring</h1>
+                <p id="dateRange">Please open a CSV file to begin</p>
+            </div>
+            <div class="header-right">
+                <label for="uploadCsv" class="btn" style="cursor: pointer;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                    </svg>
+                    Open CSV
+                </label>
+                <input type="file" id="uploadCsv" accept=".csv" style="display: none;">
+
+                <div class="date-range-group">
+                    <input type="date" id="startDate" class="btn btn-sm" title="Start Date">
+                    <span style="color: var(--text-secondary); font-size: 0.875rem;">to</span>
+                    <input type="date" id="endDate" class="btn btn-sm" title="End Date">
+                    <button id="applyDateRange" class="btn btn-sm"
+                        style="background: var(--primary); color: white; border-color: var(--primary);">Go</button>
+                </div>
+
+                <div class="zoom-controls" style="display: inline-flex; gap: 8px;">
+                    <button class="btn btn-sm" onclick="zoomTime(24)">1 Day</button>
+                    <button class="btn btn-sm" onclick="zoomTime(24*7)">1 Week</button>
+                    <button class="btn btn-sm" onclick="zoomTime(24*30)">1 Month</button>
+                    <button id="resetZoomBtn" class="btn btn-sm">All</button>
+                </div>
+
+                <button class="btn btn-sm" onclick="resetApp()"
+                    style="margin-left: 12px; border-color: var(--danger); color: var(--danger);"
+                    title="Clear all data and reset to empty state">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                        <path d="M3 3v5h5"></path>
+                    </svg>
+                    Reset App
+                </button>
+            </div>
+        </header>
+
+        <main class="grid-container">
+            <!-- KPIs -->
+            <div class="kpi-row">
+                <div class="kpi-card">
+                    <h3>Avg Export Power</h3>
+                    <div class="value" id="kpiPower">- MW</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="title">Avg Steam to Turbine</div>
+                    <div class="value" id="kpiSteam">- t/h</div>
+                </div>
+                <div class="kpi-card">
+                    <select id="kpiSelector3" class="kpi-select">
+                        <option value="temp">Avg Post Combustion Temp</option>
+                        <option value="idf">Avg IDF Load</option>
+                        <option value="rgf">Avg RGF Load</option>
+                        <option value="paf">Avg PAF Load</option>
+                    </select>
+                    <div class="value" id="kpiValue3">- °C</div>
+                </div>
+            </div>
+
+            <!-- Main Chart -->
+            <div class="chart-card main-chart-card">
+                <div class="card-header">
+                    <h2>Operation Trends</h2>
+                    <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+
+                        <button class="btn btn-sm btn-outline" id="timeDiffBtn" onclick="toggleMeasureMode()">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <polyline points="12 6 12 12 16 14"></polyline>
+                            </svg>
+                            Time Diff
+                        </button>
+                        <button class="btn btn-sm btn-outline" id="thresholdBtn" onclick="toggleThresholdPanel()">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M5 12h14"></path>
+                                <path d="M12 5v14"></path>
+                            </svg>
+                            Limits
+                        </button>
+                        <span id="measureOutput"
+                            style="display:none; font-family: 'Outfit'; font-weight: 600; color: var(--primary); font-size: 0.9rem;"></span>
+
+                        <!-- Limits Input (Inline) -->
+                        <div id="thresholdPanel"
+                            style="display: none; align-items: center; gap: 8px; background: rgba(255,255,255,0.5); padding: 2px 8px; border-radius: 6px; border: 1px solid #cbd5e1;">
+                            <span style="font-size: 0.75rem; font-weight: 600; color: #475569;">Limit:</span>
+                            <input type="number" id="powerThresholdInput"
+                                style="width: 60px; padding: 2px 4px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.8rem;"
+                                placeholder="MW" onchange="updateThresholds()">
+                        </div>
+
+                        <button class="btn btn-sm" onclick="captureDashboard()" title="Capture Dashboard Screenshot">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path
+                                    d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z">
+                                </path>
+                                <circle cx="12" cy="13" r="4"></circle>
+                            </svg>
+                            Capture
+                        </button>
+                    </div>
+                </div>
+
+                <div class="chart-wrapper">
+                    <canvas id="mainChart"></canvas>
+                </div>
+
+                <!-- Toggle Legend Row -->
+                <div class="legend-toggles" id="legendToggles"
+                    style="margin-top: 12px; padding: 0 8px; flex-wrap: wrap; justify-content: center;">
+                    <!-- Checkboxes generated by JS -->
+                </div>
+
+                <div class="status-legend"
+                    style="margin-top: 8px; padding-top: 8px; border-top: 1px dashed #e2e8f0; display: flex; gap: 16px; justify-content: center; flex-wrap: wrap;">
+                    <div class="legend-item" style="display: flex; align-items: center; gap: 6px;">
+                        <span
+                            style="width: 8px; height: 8px; border-radius: 50%; background-color: #22c55e; display: inline-block;"></span>
+                        <span style="font-size: 0.75rem; color: #64748b; font-weight: 500;">Grate</span>
+                    </div>
+                    <div class="legend-item" style="display: flex; align-items: center; gap: 6px;">
+                        <span
+                            style="width: 0; height: 0; border-left: 3px solid transparent; border-right: 3px solid transparent; border-bottom: 6px solid #3b82f6; display: inline-block;"></span>
+                        <span style="font-size: 0.75rem; color: #64748b; font-weight: 500;">Pursher</span>
+                    </div>
+                    <div class="legend-item" style="display: flex; align-items: center; gap: 6px;">
+                        <span style="width: 8px; height: 8px; background-color: #f59e0b; display: inline-block;"></span>
+                        <span style="font-size: 0.75rem; color: #64748b; font-weight: 500;">Slage plug</span>
+                    </div>
+                    <div class="legend-item" style="display: flex; align-items: center; gap: 6px;">
+                        <span
+                            style="width: 6px; height: 6px; background-color: #ef4444; transform: rotate(45deg); display: inline-block; margin: 2px;"></span>
+                        <span style="font-size: 0.75rem; color: #64748b; font-weight: 500;">Fan</span>
+                    </div>
+                    <div class="legend-item" style="display: flex; align-items: center; gap: 6px;">
+                        <span
+                            style="width: 10px; height: 10px; background-color: #a855f7; display: inline-block; clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);"></span>
+                        <span style="font-size: 0.75rem; color: #64748b; font-weight: 500;">Different Bag Filter</span>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay" style="display: none;">
+        <div class="spinner"></div>
+        <p>Processing Data...</p>
+    </div>
+
+    <script src="data-store.js?v=2.1"></script>
+    <script src="app.js?v=2.1"></script>
+</body>
+
+</html>
