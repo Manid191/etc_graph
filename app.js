@@ -131,7 +131,7 @@ async function init() {
 }
 
 async function loadInitialData() {
-    const DATA_FILE = 'data.csv';
+    const DATA_FILE = 'data.csv?v=' + new Date().getTime();
     Papa.parse(DATA_FILE, {
         download: true,
         header: true,
