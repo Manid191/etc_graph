@@ -114,20 +114,8 @@ async function init() {
         });
     }
 
-    // Try to load default data from JS store first (bypasses local CORS)
-    if (window.DEFAULT_CSV_DATA) {
-        console.log('Loading data from data-store.js');
-        Papa.parse(window.DEFAULT_CSV_DATA, {
-            header: true,
-            skipEmptyLines: true,
-            complete: function (results) {
-                processData(results.data, results.meta.fields);
-            }
-        });
-    } else {
-        // Fallback to fetching data.csv (works on servers)
-        loadInitialData();
-    }
+    // Force load from data.csv (ignoring data-store.js)
+    loadInitialData();
 }
 
 async function loadInitialData() {
