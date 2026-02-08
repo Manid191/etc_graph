@@ -807,7 +807,7 @@ function renderMainChart() {
                     position: 'right',
                     // Fixed scale for Fans (Max data + 10%)
                     min: 0,
-                    max: Math.ceil(maxFanVal * 1.1),
+                    max: 120,
                     title: { display: true, text: 'Fan Speed (%)', color: COLORS.idf },
                     grid: { drawOnChartArea: false },
                     ticks: {
