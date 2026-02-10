@@ -896,7 +896,7 @@ function renderMainChart() {
                     position: 'right',
                     title: { display: true, text: 'Post Combustion Temp (°C)', color: COLORS.temp1 },
                     grid: { drawOnChartArea: false },
-                    min: Math.floor(minTempVal - tempPadding), // Fixed scale
+                    min: 0,
                     max: Math.ceil(maxTempVal + tempPadding), // Fixed scale
                     ticks: {
                         precision: 0,
