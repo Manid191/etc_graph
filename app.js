@@ -110,7 +110,7 @@ async function init() {
     if (applyDateBtn) applyDateBtn.addEventListener('click', handleDateRange);
     if (document.getElementById('kpiSelector3')) {
         document.getElementById('kpiSelector3').addEventListener('change', () => {
-            if (charts.main) updateVisibleRange(charts.main);
+            if (AppState.charts.main) updateVisibleRange(AppState.charts.main);
         });
     }
 
@@ -189,11 +189,13 @@ function handleDateRange() {
     let end;
     if (endDateInput.value) {
         end = new Date(endDateInput.value);
-        end.setHours(23, 59, 59, 999);
+        end.setDate(end.getDate() + 1);
+        end.setHours(0, 0, 0, 0);
     } else {
-        // If no end date selected, default to single day view (Start Date 00:00 to 23:59)
+        // If no end date selected, set to next day 00:00 for full 24h cycle (Start 00:01 - End 24:00)
         end = new Date(start);
-        end.setHours(23, 59, 59, 999);
+        end.setDate(end.getDate() + 1);
+        end.setHours(0, 0, 0, 0);
     }
 
     if (start > end) {
@@ -207,7 +209,10 @@ function handleDateRange() {
         AppState.charts.main.options.scales.x.time.unit = 'hour';
     }
 
-    AppState.charts.main.zoomScale('x', { min: start.getTime(), max: end.getTime() }, 'default');
+    // User Requirement: Start at 01:00, End at 24:00 (Next Day 00:00)
+    // Add 1 hour to start time for the VIEW
+    const viewMin = start.getTime() + (1 * 60 * 60 * 1000); // 01:00
+    AppState.charts.main.zoomScale('x', { min: viewMin, max: end.getTime() }, 'default');
     updateVisibleRange(AppState.charts.main);
 }
 
@@ -312,9 +317,23 @@ function processData(data, fields) {
     renderMainChart();
     updateHeader();
 
+    updateHeader();
+
     setTimeout(() => {
         window.zoomTime('all');
     }, 100);
+}
+
+function formatUserDate(date) {
+    if (date.getHours() === 0 && date.getMinutes() === 0) {
+        const prev = new Date(date);
+        prev.setDate(prev.getDate() - 1);
+        const d = String(prev.getDate()).padStart(2, '0');
+        const m = String(prev.getMonth() + 1).padStart(2, '0');
+        const y = prev.getFullYear();
+        return `${d}/${m}/${y} 24:00`;
+    }
+    return null;
 }
 
 function parseFlexDate(str) {
@@ -323,17 +342,30 @@ function parseFlexDate(str) {
     // Try D/M/YYYY H:mm
     const matchDMY = str.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})/);
     if (matchDMY) {
-        return new Date(parseInt(matchDMY[3]), parseInt(matchDMY[2]) - 1, parseInt(matchDMY[1]), parseInt(matchDMY[4]), parseInt(matchDMY[5]));
+        const d = new Date(parseInt(matchDMY[3]), parseInt(matchDMY[2]) - 1, parseInt(matchDMY[1]), parseInt(matchDMY[4]), parseInt(matchDMY[5]));
+        if (d.getHours() === 0 && d.getMinutes() === 0) {
+            d.setDate(d.getDate() + 1);
+        }
+        return d;
     }
 
     // Try YYYY-MM-DD HH:mm
     const matchYMD = str.match(/(\d{4})-(\d{1,2})-(\d{1,2})\s+(\d{1,2}):(\d{2})/);
     if (matchYMD) {
-        return new Date(parseInt(matchYMD[1]), parseInt(matchYMD[2]) - 1, parseInt(matchYMD[3]), parseInt(matchYMD[4]), parseInt(matchYMD[5]));
+        const d = new Date(parseInt(matchYMD[1]), parseInt(matchYMD[2]) - 1, parseInt(matchYMD[3]), parseInt(matchYMD[4]), parseInt(matchYMD[5]));
+        if (d.getHours() === 0 && d.getMinutes() === 0) {
+            d.setDate(d.getDate() + 1);
+        }
+        return d;
     }
 
     const d = new Date(str);
-    return isNaN(d.getTime()) ? null : d;
+    const result = isNaN(d.getTime()) ? null : d;
+
+    if (result && result.getHours() === 0 && result.getMinutes() === 0) {
+        result.setDate(result.getDate() + 1);
+    }
+    return result;
 }
 
 function updateHeader() {
@@ -351,7 +383,10 @@ function updateKPIs(startTime = null, endTime = null) {
     if (startTime !== null && endTime !== null) {
         dataToCalc = AppState.rawData.filter(d => {
             const t = d.date.getTime();
-            return t >= startTime && t <= endTime;
+            // User Logic: Start 00:01, End 00:00 (Next Day)
+            // Value at StartTime (00:00) is excluded (belongs to prev day)
+            // Value at EndTime (00:00 next day) is included
+            return t > startTime && t <= endTime;
         });
     }
 
@@ -363,9 +398,10 @@ function updateKPIs(startTime = null, endTime = null) {
         return;
     }
 
-    // Helper to calculate average ignoring negative values
+    // Helper to calculate average ignoring zero, negative, or empty values (Improved Logic)
     const calcAvg = (data, key) => {
-        const valid = data.map(d => d[key]).filter(v => v >= 0);
+        // Filter: Value must be strictly greater than 0
+        const valid = data.map(d => d[key]).filter(v => v !== null && v !== undefined && v > 0);
         if (valid.length === 0) return 0;
         return (valid.reduce((acc, val) => acc + val, 0) / valid.length);
     };
@@ -784,7 +820,34 @@ function renderMainChart() {
                     grid: { color: 'rgba(0, 0, 0, 0.1)' },
                     ticks: {
                         color: '#64748b',
-                        font: { family: 'Outfit' }
+                        font: { family: 'Outfit' },
+                        callback: function (val, index, ticks) {
+                            const min = this.chart.scales.x.min;
+                            const max = this.chart.scales.x.max;
+                            const range = max - min;
+                            const dayMs = 26 * 3600 * 1000; // Small buffer for > 24h
+
+                            const date = new Date(val);
+
+                            // Day View (Time Only)
+                            if (range <= dayMs) {
+                                // Check for 00:00 -> 24:00 (Special Case)
+                                if (date.getHours() === 0 && date.getMinutes() === 0) {
+                                    // If it's the "end" of the previous day, show 24:00
+                                    // Visual trick: 00:00 is usually shown as 24:00 of prev day.
+                                    return '24:00';
+                                }
+                                const hh = String(date.getHours()).padStart(2, '0');
+                                const mm = String(date.getMinutes()).padStart(2, '0');
+                                return `${hh}:${mm}`;
+                            }
+
+                            // Long View (Date Only)
+                            const d = String(date.getDate()).padStart(2, '0');
+                            const m = String(date.getMonth() + 1).padStart(2, '0');
+                            const y = date.getFullYear();
+                            return `${d}/${m}/${y}`;
+                        }
                     }
                 },
                 y_steam: {
@@ -864,6 +927,22 @@ function renderMainChart() {
                                 label += context.parsed.y;
                             }
                             return label;
+                        },
+                        title: function (context) {
+                            if (context.length > 0) {
+                                const date = new Date(context[0].parsed.x);
+                                const custom = formatUserDate(date);
+                                if (custom) return custom;
+
+                                // Default format matching tooltipFormat
+                                const d = String(date.getDate()).padStart(2, '0');
+                                const m = String(date.getMonth() + 1).padStart(2, '0');
+                                const y = date.getFullYear();
+                                const hh = String(date.getHours()).padStart(2, '0');
+                                const mm = String(date.getMinutes()).padStart(2, '0');
+                                return `${d}/${m}/${y} ${hh}:${mm}`;
+                            }
+                            return '';
                         }
                     }
                 },
@@ -976,8 +1055,12 @@ window.zoomTime = function (hours) {
     } else if (hours === 24) {
         const anchorDate = new Date(centerTime);
         anchorDate.setHours(0, 0, 0, 0);
-        newMin = anchorDate.getTime();
-        newMax = newMin + (24 * 3600 * 1000);
+        newMin = anchorDate.getTime() + (3600 * 1000); // Start at 01:00
+        newMax = anchorDate.getTime() + (24 * 3600 * 1000) + (3600 * 1000); // End at next day 01:00? Or just 24h span?
+        // User wants 01:00 to 24:00 usually.
+        // If "Day View", usually means 01:00 to 24:00 (Next day 00:00).
+        // Let's stick to the handleDateRange logic: End at 00:00 next day.
+        newMax = anchorDate.getTime() + (24 * 3600 * 1000);
         newUnit = 'hour';
     } else {
         const rangeMs = hours * 3600 * 1000;
@@ -1066,7 +1149,70 @@ window.captureDashboard = function () {
         link.href = canvas.toDataURL('image/png');
         link.click();
     });
-};
 
 
+
+}
+
+function handleWheel(e) {
+    e.preventDefault();
+    const chart = AppState.charts.main;
+    const scale = chart.scales.x;
+    const currentRange = scale.max - scale.min;
+    const hourMs = 3600 * 1000;
+    const dayMs = 24 * hourMs;
+
+    // "Day View" is approx 23h (01:00-24:00) or 24h. Let's say 22h to 26h.
+    const isDayView = currentRange > (22 * hourMs) && currentRange < (26 * hourMs);
+    const isMonthView = currentRange > (25 * dayMs) && currentRange < (35 * dayMs);
+
+    let newMin, newMax;
+
+    if (isDayView) {
+        const direction = Math.sign(e.deltaY);
+        // Find anchor "Midnight" from current view.
+        let anchor = new Date(scale.min);
+
+        // Compensate if we are starting at 01:00 to find the true "Day"
+        if (anchor.getHours() === 1) {
+            anchor.setHours(0, 0, 0, 0);
+        } else {
+            // General snap to midnight
+            anchor.setHours(0, 0, 0, 0);
+        }
+
+        // Move by 1 Day
+        anchor.setDate(anchor.getDate() + direction);
+
+        // Set New Range: 01:00 to 24:00 (Next Day 00:00)
+        newMin = anchor.getTime() + hourMs; // 01:00
+        newMax = anchor.getTime() + dayMs;  // 24:00 (Next Day 00:00) 
+
+    } else if (isMonthView) {
+        const direction = Math.sign(e.deltaY);
+        const d = new Date(scale.min);
+        d.setDate(1);
+        d.setHours(0, 0, 0, 0);
+        d.setMonth(d.getMonth() + direction);
+        newMin = d.getTime();
+        const d2 = new Date(d);
+        d2.setMonth(d2.getMonth() + 1);
+        newMax = d2.getTime();
+    } else {
+        const shift = currentRange * 0.1 * Math.sign(e.deltaY);
+        newMin = scale.min + shift;
+        newMax = scale.max + shift;
+    }
+
+    if (AppState.rawData.length > 0) {
+        const dataMin = AppState.rawData[0].date.getTime();
+        const dataMax = AppState.rawData[AppState.rawData.length - 1].date.getTime();
+        if (newMax < dataMin || newMin > dataMax) return;
+    }
+
+    chart.options.scales.x.min = newMin;
+    chart.options.scales.x.max = newMax;
+    chart.update('none');
+    updateVisibleRange(chart);
+}
 
