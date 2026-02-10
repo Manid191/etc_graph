@@ -40,6 +40,36 @@ const COLORS = {
     problem: '#dc2626'
 };
 
+/**
+ * Creates a solid 5-pointed star on a canvas for use as a Chart.js pointStyle.
+ */
+function createStarCanvas(color, size = 12) {
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    const cx = size / 2;
+    const cy = size / 2;
+    const spikes = 5;
+    const outerRadius = size / 2;
+    const innerRadius = size / 5;
+
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - outerRadius);
+    for (let i = 0; i < spikes; i++) {
+        let x = cx + Math.cos(((i * 2 * Math.PI) / spikes) - (Math.PI / 2)) * outerRadius;
+        let y = cy + Math.sin(((i * 2 * Math.PI) / spikes) - (Math.PI / 2)) * outerRadius;
+        ctx.lineTo(x, y);
+        x = cx + Math.cos((((i + 0.5) * 2 * Math.PI) / spikes) - (Math.PI / 2)) * innerRadius;
+        y = cy + Math.sin((((i + 0.5) * 2 * Math.PI) / spikes) - (Math.PI / 2)) * innerRadius;
+        ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+    return canvas;
+}
+
 const uploadInput = document.getElementById('uploadCsv');
 const applyDateBtn = document.getElementById('applyDateRange');
 const startDateInput = document.getElementById('startDate');
@@ -268,13 +298,13 @@ function processData(data, fields) {
 
         return {
             date: date,
-            steam: parseFloat(row[keys.steam]),
-            power: parseFloat(row[keys.power]),
-            tempComb: parseFloat(row[keys.tempComb]),
-            tempFlue: parseFloat(row[keys.tempFlue]),
-            idf: parseFloat(row[keys.idf]),
-            rgf: parseFloat(row[keys.rgf]),
-            paf: parseFloat(row[keys.paf]),
+            steam: parseFloat(row[keys.steam]) || 0,
+            power: parseFloat(row[keys.power]) || 0,
+            tempComb: parseFloat(row[keys.tempComb]) || 0,
+            tempFlue: parseFloat(row[keys.tempFlue]) || 0,
+            idf: parseFloat(row[keys.idf]) || 0,
+            rgf: parseFloat(row[keys.rgf]) || 0,
+            paf: parseFloat(row[keys.paf]) || 0,
             soot: parseFloat(row[keys.soot]) || 0,
             problemVal: (() => {
                 const raw = row[keys.problem];
@@ -294,14 +324,16 @@ function processData(data, fields) {
                 if (!isNaN(num)) return num > 0 ? "Problem" : "";
                 return trimmed; // Return the text code (S, B, F, etc.)
             })(),
-            problemCode: (() => {
+            problemCodes: (() => {
                 const raw = row[keys.problem];
-                if (!raw || raw.trim() === '') return 0;
+                if (!raw || raw.trim() === '') return [];
                 const trimmed = raw.trim();
-                if (['-', '.', '_', 'n/a', 'null'].includes(trimmed.toLowerCase())) return 0;
-                const num = parseInt(trimmed);
-                if (!isNaN(num) && num >= 1 && num <= 5) return num;
-                return 0; // Default or non-numeric
+                // Match all digits 1-5
+                const matches = trimmed.match(/[1-5]/g);
+                if (matches) {
+                    return matches.map(m => parseInt(m));
+                }
+                return [];
             })()
         };
     }).filter(d => d.date && !isNaN(d.date.getTime()) && !isNaN(d.power));
@@ -315,8 +347,6 @@ function processData(data, fields) {
 
     updateKPIs();
     renderMainChart();
-    updateHeader();
-
     updateHeader();
 
     setTimeout(() => {
@@ -398,10 +428,9 @@ function updateKPIs(startTime = null, endTime = null) {
         return;
     }
 
-    // Helper to calculate average ignoring zero, negative, or empty values (Improved Logic)
+    // Helper to calculate average ignoring zero, negative, NaN, or empty values
     const calcAvg = (data, key) => {
-        // Filter: Value must be strictly greater than 0
-        const valid = data.map(d => d[key]).filter(v => v !== null && v !== undefined && v > 0);
+        const valid = data.map(d => d[key]).filter(v => !isNaN(v) && v > 0);
         if (valid.length === 0) return 0;
         return (valid.reduce((acc, val) => acc + val, 0) / valid.length);
     };
@@ -443,17 +472,31 @@ function renderMainChart() {
 
     const ctx = document.getElementById('mainChart').getContext('2d');
 
-    // Mappings for Problem CODES (1-4)
+    // Mappings for Problem CODES (1-5)
+    const starCanvas = createStarCanvas('#a855f7', 10);
     const PROBLEM_CONFIG = {
         1: { style: 'circle', color: '#22c55e' },   // Green Circle
         2: { style: 'triangle', color: '#3b82f6' }, // Blue Triangle
         3: { style: 'rect', color: '#f59e0b' },     // Orange Square
         4: { style: 'rectRot', color: '#ef4444' },  // Red Diamond
-        5: { style: 'star', color: '#a855f7' }      // Purple Star
+        5: { style: starCanvas, color: '#a855f7' }  // Purple Solid Star
     };
 
-    // Filter data that has a problem (either text or code > 0)
-    const problemData = AppState.rawData.filter(d => d.problemVal > 0 || d.problemCode > 0);
+    // Flatten problem data so each code in a row gets its own point
+    const problemDataPoints = [];
+    AppState.rawData.forEach(d => {
+        if (d.problemCodes.length > 0) {
+            d.problemCodes.forEach((code, idx) => {
+                problemDataPoints.push({
+                    x: d.date,
+                    // Stack symbols vertically: Base 1.1 + small offset per symbol in the same time point
+                    y: 1.1 + (idx * 0.05),
+                    code: code,
+                    customLabel: d.problemText
+                });
+            });
+        }
+    });
 
     const datasets = [
         {
@@ -541,17 +584,16 @@ function renderMainChart() {
         },
         {
             label: 'Problem',
-            data: problemData.map(d => ({ x: d.date, y: 1.1, code: d.problemCode, customLabel: d.problemText })),
-            // Map styles based on code. Fallback to default problem style if code is 0 (text-only)
-            pointStyle: problemData.map(d => PROBLEM_CONFIG[d.problemCode]?.style || 'crossRot'),
-            backgroundColor: problemData.map(d => PROBLEM_CONFIG[d.problemCode]?.color || COLORS.problem),
-            borderColor: '#64748b', // Grey border for better visibility
+            data: problemDataPoints,
+            // Map styles based on code.
+            pointStyle: problemDataPoints.map(p => PROBLEM_CONFIG[p.code]?.style || 'crossRot'),
+            backgroundColor: problemDataPoints.map(p => PROBLEM_CONFIG[p.code]?.color || COLORS.problem),
+            borderColor: '#64748b',
             yAxisID: 'y_soot',
             type: 'scatter',
-            pointRadius: 3, // Fixed size
+            pointRadius: 3,
             borderWidth: 1,
-            hidden: false, // Default visible now? or stick to hidden? User is actively working on it, maybe visible.
-            // But previous was hidden: true. I'll set it to false so they can SEE the result.
+            hidden: false,
             order: 50
         }
     ];
@@ -974,50 +1016,7 @@ function renderMainChart() {
     document.getElementById('resetZoomBtn').onclick = () => window.zoomTime('all');
 }
 
-function handleWheel(e) {
-    e.preventDefault();
-    const chart = AppState.charts.main;
-    const scale = chart.scales.x;
-    const currentRange = scale.max - scale.min;
-    const dayMs = 24 * 60 * 60 * 1000;
-    const isDayView = Math.abs(currentRange - dayMs) < 100000;
-    const isMonthView = currentRange > (25 * dayMs) && currentRange < (35 * dayMs);
-
-    let newMin, newMax;
-
-    if (isDayView) {
-        const direction = Math.sign(e.deltaY);
-        const currentStart = new Date(scale.min);
-        currentStart.setHours(0, 0, 0, 0);
-        newMin = currentStart.getTime() + (direction * dayMs);
-        newMax = newMin + dayMs;
-    } else if (isMonthView) {
-        const direction = Math.sign(e.deltaY);
-        const d = new Date(scale.min);
-        d.setDate(1);
-        d.setHours(0, 0, 0, 0);
-        d.setMonth(d.getMonth() + direction);
-        newMin = d.getTime();
-        const d2 = new Date(d);
-        d2.setMonth(d2.getMonth() + 1);
-        newMax = d2.getTime();
-    } else {
-        const shift = currentRange * 0.1 * Math.sign(e.deltaY);
-        newMin = scale.min + shift;
-        newMax = scale.max + shift;
-    }
-
-    if (AppState.rawData.length > 0) {
-        const dataMin = AppState.rawData[0].date.getTime();
-        const dataMax = AppState.rawData[AppState.rawData.length - 1].date.getTime();
-        if (newMax < dataMin || newMin > dataMax) return;
-    }
-
-    chart.options.scales.x.min = newMin;
-    chart.options.scales.x.max = newMax;
-    chart.update('none');
-    updateVisibleRange(chart);
-}
+// handleWheel: See definition below (after captureDashboard)
 
 window.zoomTime = function (hours) {
     const chart = AppState.charts.main;
@@ -1056,11 +1055,7 @@ window.zoomTime = function (hours) {
         const anchorDate = new Date(centerTime);
         anchorDate.setHours(0, 0, 0, 0);
         newMin = anchorDate.getTime() + (3600 * 1000); // Start at 01:00
-        newMax = anchorDate.getTime() + (24 * 3600 * 1000) + (3600 * 1000); // End at next day 01:00? Or just 24h span?
-        // User wants 01:00 to 24:00 usually.
-        // If "Day View", usually means 01:00 to 24:00 (Next day 00:00).
-        // Let's stick to the handleDateRange logic: End at 00:00 next day.
-        newMax = anchorDate.getTime() + (24 * 3600 * 1000);
+        newMax = anchorDate.getTime() + (24 * 3600 * 1000); // End at 24:00 (Next Day 00:00)
         newUnit = 'hour';
     } else {
         const rangeMs = hours * 3600 * 1000;
